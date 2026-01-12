@@ -12,7 +12,6 @@ export const costs = [
     min: 0.8825,
     max: 0.8825,
     avg: 0.8825,
-    counter: 10151,
   },
   {
     snapshotId: 958422,
