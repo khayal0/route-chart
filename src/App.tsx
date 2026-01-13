@@ -10,85 +10,25 @@ import {
   Legend,
   Customized,
 } from "recharts"
-import type { DataKey } from "recharts/types/util/types"
 import customParseFormat from "dayjs/plugin/customParseFormat"
 import isoWeek from "dayjs/plugin/isoWeek"
 import dayjs from "dayjs"
-
-import { costs as costsRawR1 } from "./data/cost.js"
-import { spreads as spreadsRawR1 } from "./data/spread.js"
-import { costs as costsRawR2 } from "./data/cost2.js"
-import { spreads as spreadsRawR2 } from "./data/spread2.js"
-
-import "./App.css"
+import { costs as costsRawR1 } from "./data/cost.ts"
+import { spreads as spreadsRawR1 } from "./data/spread.ts"
+import { costs as costsRawR2 } from "./data/cost2.ts"
+import { spreads as spreadsRawR2 } from "./data/spread2.ts"
 import CustomLegend from "./CustomLegend.tsx"
 import CustomTooltip from "./CustomTooltip.tsx"
 import HighlightAreas from "./HighlightAreas.tsx"
+import type { CombinedRow, MetricBase, MetricKeyForRoute, RouteData, RouteKey } from "./types.ts"
+import { COLORS, METRICS } from "./constants.ts"
+import "./App.css"
 
 dayjs.extend(customParseFormat)
 dayjs.extend(isoWeek)
 
-type CostRow = {
-  snapshotId: number
-  timestampUk: string
-  tenor: string
-  source: "acp" | "trayport" | string
-  costCalculationType: "All" | "Fixed" | "Variable"
-  avg: number
-}
 
-type SpreadRow = {
-  snapshotId: number
-  timestampUk: string
-  tenor: string
-  avg: number
-}
-
-type RouteKey = "r1" | "r2"
-
-export type CombinedRow = {
-  timestampUk: string
-  tenor: string
-
-  cost_all_r1?: number
-  cost_fixed_r1?: number
-  cost_variable_r1?: number
-  spread_acp_r1?: number
-  spread_trayport_r1?: number
-
-  cost_all_r2?: number
-  cost_fixed_r2?: number
-  cost_variable_r2?: number
-  spread_acp_r2?: number
-  spread_trayport_r2?: number
-}
-
-export const COLORS: Record<string, string> = {
-  cost_all: "#4afe03",
-  cost_fixed: "#0367fe",
-  cost_variable: "#38fff8",
-  spread_acp: "#ef4444",
-  spread_trayport: "#facc15",
-}
-
-const ROUTE_2_DASH = "6 4";
-
-function normalizeCostType(v: string) {
-  const t = v.toLowerCase()
-  if (t === "all") return "all"
-  if (t === "fixed") return "fixed"
-  if (t === "variable") return "variable"
-  return "other"
-}
-
-function normalizeMarket(v: string) {
-  const t = v.toLowerCase()
-  if (t === "acp") return "acp"
-  if (t === "trayport") return "trayport"
-  return "other"
-}
-
-function deduplicateWeekends<T extends Record<string, unknown>>(data: T[]) {
+function deduplicateWeekendData<T extends Record<string, unknown>>(data: T[]) {
   const seen = new Set<string>()
   const excluded = new Set(["timestampUk", "timestampUtc", "counter", "snapshotId"])
 
@@ -118,14 +58,6 @@ function deduplicateWeekends<T extends Record<string, unknown>>(data: T[]) {
   })
 }
 
-type RouteData = { costs: CostRow[]; spreads: SpreadRow[] }
-
-// ✅ add these types just above combineRouteIntoMap (or near RouteKey)
-type CostBase = "cost_all" | "cost_fixed" | "cost_variable"
-type SpreadBase = "spread_acp" | "spread_trayport"
-type MetricBase = CostBase | SpreadBase
-type MetricKeyForRoute<R extends RouteKey> = `${MetricBase}_${R}`
-
 function metricKey<R extends RouteKey>(base: MetricBase, routeKey: R): MetricKeyForRoute<R> {
   return `${base}_${routeKey}` as MetricKeyForRoute<R>
 }
@@ -138,7 +70,7 @@ function combineRouteIntoMap(route: RouteData, routeKey: RouteKey, map: Map<stri
 
   for (const c of route.costs) {
     const row = ensure(c.timestampUk, c.tenor)
-    const t = normalizeCostType(c.costCalculationType)
+    const t = c.costCalculationType?.toLowerCase();
     if (t === "all") row[metricKey("cost_all", routeKey)] = c.avg
     if (t === "fixed") row[metricKey("cost_fixed", routeKey)] = c.avg
     if (t === "variable") row[metricKey("cost_variable", routeKey)] = c.avg
@@ -146,9 +78,8 @@ function combineRouteIntoMap(route: RouteData, routeKey: RouteKey, map: Map<stri
 
   for (const s of route.spreads) {
     const row = ensure(s.timestampUk, s.tenor)
-    const m = normalizeMarket(s.source)
-    if (m === "acp") row[metricKey("spread_acp", routeKey)] = s.avg
-    if (m === "trayport") row[metricKey("spread_trayport", routeKey)] = s.avg
+    if (s.source?.toLowerCase() === "acp") row[metricKey("spread_acp", routeKey)] = s.avg
+    if (s.source?.toLowerCase() === "trayport") row[metricKey("spread_trayport", routeKey)] = s.avg
   }
 }
 
@@ -158,99 +89,70 @@ function combineTwoRoutes(route1: RouteData, route2?: RouteData | null): Combine
   if (route2) combineRouteIntoMap(route2, "r2", map)
 
   return Array.from(map.values()).sort(
-    (a, b) => new Date(a.timestampUk).getTime() - new Date(b.timestampUk).getTime()
+    (a, b) => dayjs(a.timestampUk).valueOf() - dayjs(b.timestampUk).valueOf()
   )
 }
 
 /** Canonical metrics (ONE legend item each) */
-type MetricKey = "spread_acp" | "spread_trayport" | "cost_all" | "cost_fixed" | "cost_variable" | "highlight"
+export type MetricKey = "spread_acp" | "spread_trayport" | "cost_all" | "cost_fixed" | "cost_variable" | "highlight" | "second_route";
 
-export const METRICS: Array<{ key: MetricKey; label: string; colorKey: MetricKey }> = [
-  { key: "spread_acp", label: "Spread ACP", colorKey: "spread_acp" },
-  { key: "spread_trayport", label: "Spread Trayport", colorKey: "spread_trayport" },
-  { key: "cost_all", label: "Cost All", colorKey: "cost_all" },
-  { key: "cost_fixed", label: "Cost Fixed", colorKey: "cost_fixed" },
-  { key: "cost_variable", label: "Cost Variable", colorKey: "cost_variable" },
-]
 
 function toR1(metric: MetricKey) {
-  return `${metric}_r1` as keyof CombinedRow
+  return `${metric}_r1`
 }
 function toR2(metric: MetricKey) {
-  return `${metric}_r2` as keyof CombinedRow
+  return `${metric}_r2`
 }
 
 
 export default function CostsAndSpreadsChart() {
-  const route1: RouteData = useMemo(
-    () => ({
-      costs: deduplicateWeekends(costsRawR1 as CostRow[]),
-      spreads: deduplicateWeekends(spreadsRawR1 as SpreadRow[]),
-    }),
-    []
-  )
-
-  // Optional route2 (set to null when not available)
-  const route2: RouteData | null = useMemo(
-    () => ({
-      costs: deduplicateWeekends(costsRawR2 as CostRow[]),
-      spreads: deduplicateWeekends(spreadsRawR2 as SpreadRow[]),
-    }),
-    []
-  )
-
-  const hasRoute2 = Boolean(route2)
-  const data = useMemo(() => combineTwoRoutes(route1, route2), [route1, route2])
-
-  /**
-   * One hidden flag per metric (legend does NOT duplicate).
-   * Toggling "Spread ACP" hides BOTH r1 and r2 lines for that metric.
-   */
   const [hidden, setHidden] = useState<Record<MetricKey, boolean>>({
     spread_acp: false,
     spread_trayport: true,
     cost_all: false,
     cost_fixed: true,
     cost_variable: true,
-    highlight: false
+    highlight: false,
+    second_route: true,
   })
+
+
+  const route1: RouteData = useMemo(
+    () => ({
+      costs: deduplicateWeekendData(costsRawR1),
+      spreads: deduplicateWeekendData(spreadsRawR1),
+    }),
+    []
+  )
+
+  const route2: RouteData | null = useMemo(() => {
+    if ((!costsRawR2?.length && !spreadsRawR2?.length) || hidden.second_route) {
+      return null;
+    }
+    return {
+      costs: deduplicateWeekendData(costsRawR2),
+      spreads: deduplicateWeekendData(spreadsRawR2),
+    };
+  }, [hidden])
+
+  const hasRoute2 = Boolean(route2)
+  const data = useMemo(() => combineTwoRoutes(route1, route2), [route1, route2])
+
 
   const toggleMetric = (metric: string) => {
     const m = metric as MetricKey
     setHidden((prev) => ({ ...prev, [m]: !prev[m] }))
   }
 
-  /**
-   * Your CustomLegend likely relies on payload.dataKey to toggle.
-   * We want legend items to carry canonical keys (e.g. "spread_acp"),
-   * NOT "spread_acp_r1".
-   *
-   * So: we render legend from route1 lines only, but set their dataKey
-   * to the canonical metric key using `legendPayload` trick:
-   * Recharts doesn't let us directly override dataKey for legend,
-   * but we *can* set the Line's `dataKey` to r1 and use `name` to
-   * identify metric — OR we keep dataKey canonical by using a "ghost" line.
-   *
-   * Easiest: keep route1 as legend owner, and in CustomLegend use `entry.value`
-   * (the `name`) as the key. If you can change CustomLegend, do that.
-   *
-   * If you cannot change it, see note below after code.
-   */
-  const resolveLegendKey = (dk: DataKey<unknown> | undefined) => {
-    if (typeof dk === "string") return dk
-    if (typeof dk === "number") return String(dk)
-    return null
-  }
-
   return (
-    <div style={{ width: "90%", height: 600 }}>
+    <div style={{ width: "100%", height: 600 }}>
       <ResponsiveContainer>
 
         <LineChart data={data} margin={{ top: 20, right: 20, left: 20, bottom: 5 }}>
           <Customized component={
             <HighlightAreas
               data={data}
-              enabled={!hidden.highlight} id={"1"} hidden={hidden} />
+              enabled={!hidden.highlight} hidden={hidden} hasRoute2={hasRoute2 && !hidden.second_route} />
           } />
           <CartesianGrid stroke="#ccc" strokeOpacity={0.1} strokeWidth={1} strokeDasharray="5 5" />
           <XAxis dataKey="timestampUk" />
@@ -269,7 +171,6 @@ export default function CostsAndSpreadsChart() {
                 payload={props.payload}
                 hiddenKeys={hidden as unknown as Record<string, boolean>}
                 onToggle={toggleMetric}
-                keyResolver={resolveLegendKey}
               />
             )}
           />
@@ -277,8 +178,8 @@ export default function CostsAndSpreadsChart() {
             <Line
               key={`${m.key}-r1`}
               type="linear"
-              dataKey={toR1(m.key) as string}
-              name={m.key} // IMPORTANT: canonical key for legend toggle
+              dataKey={toR1(m.key)}
+              name={m.key} // Canonical key for legend toggle
               stroke={COLORS[m.colorKey]}
               strokeWidth={1.5}
               dot={false}
@@ -293,11 +194,11 @@ export default function CostsAndSpreadsChart() {
               <Line
                 key={`${m.key}-r2`}
                 type="linear"
-                dataKey={toR2(m.key) as string}
+                dataKey={toR2(m.key)}
                 name={m.key}
                 stroke={COLORS[m.colorKey]}
                 strokeWidth={1.5}
-                strokeDasharray={ROUTE_2_DASH}
+                strokeDasharray="6 4"
                 dot={false}
                 connectNulls
                 hide={hidden[m.key]}

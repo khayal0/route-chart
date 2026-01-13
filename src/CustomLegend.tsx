@@ -10,7 +10,6 @@ type CustomLegendProps = {
     payload?: LegendPayloadItem[]
     hiddenKeys: Record<string, boolean>
     onToggle: (key: string) => void
-    keyResolver: (dataKey: DataKey<unknown> | undefined) => string | null
 }
 
 const LABELS: Record<string, string> = {
@@ -25,29 +24,21 @@ export default function CustomLegend({
     payload,
     hiddenKeys,
     onToggle,
-    keyResolver,
 }: CustomLegendProps) {
     if (!payload || payload.length === 0) return null
 
     const resolveToggleKey = (entry: LegendPayloadItem) => {
         const v = (entry.value ?? "").trim()
         if (v) return v
-        return keyResolver(entry.dataKey)
+        return entry.dataKey?.toString()
     }
 
-    // ✅ Deduplicate legend items by the resolved key
-    const unique = (() => {
-        const seen = new Set<string>()
-        const out: Array<{ entry: LegendPayloadItem; key: string }> = []
-        for (const entry of payload) {
-            const k = resolveToggleKey(entry)
-            if (!k) continue
-            if (seen.has(k)) continue
-            seen.add(k)
-            out.push({ entry, key: k })
-        }
-        return out
-    })()
+    const unique = payload.reduce((acc, entry) => {
+        const key = resolveToggleKey(entry)
+        if (!key || acc.some(item => item.key === key)) return acc
+
+        return [...acc, { entry, key }]
+    }, [] as Array<{ entry: LegendPayloadItem; key: string }>)
 
     return (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, paddingLeft: 55, paddingTop: 10 }}>

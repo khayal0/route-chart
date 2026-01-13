@@ -1,4 +1,4 @@
-export const costs = [
+export const costs: HistoryPoint[] = [
   {
     snapshotId: 958422,
     timestampUtc: "2026-01-05 09:01",

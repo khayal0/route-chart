@@ -3,7 +3,8 @@ import type {
     NameType,
     ValueType,
 } from "recharts/types/component/DefaultTooltipContent"
-import { COLORS, METRICS, type CombinedRow } from "./App"
+import { COLORS, METRICS } from "./constants"
+import type { CombinedRow } from "./types"
 
 export default function TwoRouteTooltip({
     active,
@@ -13,7 +14,7 @@ export default function TwoRouteTooltip({
     hiddenKeys,
 }: TooltipProps<ValueType, NameType> & {
     hasRoute2: boolean
-    hiddenKeys: Record<string, boolean> // metric keys: spread_acp, cost_all, ...
+    hiddenKeys: Record<string, boolean>
 }) {
     if (!active || !payload || payload.length === 0) return null
 
@@ -60,7 +61,6 @@ export default function TwoRouteTooltip({
                             <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                                 <span style={{ fontSize: 12, color }}>{m.label}</span>
                             </div>
-
                             <div style={{ fontSize: 12 }}>{formatNum(v1)}</div>
                             {hasRoute2 ? <div style={{ fontSize: 12 }}>{formatNum(v2)}</div> : null}
                         </div>
