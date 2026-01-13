@@ -1,4 +1,4 @@
-import React, { useMemo } from "react"
+import { useMemo } from "react"
 import type { CombinedRow } from "./App"
 
 type PairHighlighterProps = {
@@ -131,26 +131,28 @@ export function PairHighlighter(props: PairHighlighterProps & Record<string, unk
     if (segments.length === 0) return null
 
     // Find crossing where (A - B) changes sign inside a segment (pixel-space linear interpolation).
-    const splitAtCrossing = (s: Seg) => {
-        // diff is vertical separation (B - A) in pixel space
-        const diff0 = s.yB0 - s.yA0
-        const diff1 = s.yB1 - s.yA1
-        const denom = diff0 - diff1
-        if (denom === 0) return null
-
-        const t = diff0 / denom
-        if (t <= 0 || t >= 1) return null
-
-        const x = s.x0 + t * (s.x1 - s.x0)
-        const yA = s.yA0 + t * (s.yA1 - s.yA0)
-        const yB = s.yB0 + t * (s.yB1 - s.yB0)
-
-        return { x, yA, yB }
-    }
 
     type StripPoint = { x: number; yTop: number; yBot: number }
 
     const { aboveStrips, belowStrips } = useMemo(() => {
+        const splitAtCrossing = (s: Seg) => {
+            // diff is vertical separation (B - A) in pixel space
+            const diff0 = s.yB0 - s.yA0
+            const diff1 = s.yB1 - s.yA1
+            const denom = diff0 - diff1
+            if (denom === 0) return null
+
+            const t = diff0 / denom
+            if (t <= 0 || t >= 1) return null
+
+            const x = s.x0 + t * (s.x1 - s.x0)
+            const yA = s.yA0 + t * (s.yA1 - s.yA0)
+            const yB = s.yB0 + t * (s.yB1 - s.yB0)
+
+            return { x, yA, yB }
+        }
+
+
         const above: StripPoint[][] = []
         const below: StripPoint[][] = []
 
@@ -293,9 +295,9 @@ export default function MultiHighlighter(props: MultiHighlighterProps & Record<s
         hidden,
         route = "r1",
         opacityByCost = {
-            cost_all: 0.08,
-            cost_fixed: 0.1,
-            cost_variable: 0.12,
+            cost_all: 0.2,
+            cost_fixed: 0.4,
+            cost_variable: 0.6,
         },
     } = props
 
