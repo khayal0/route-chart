@@ -18,7 +18,7 @@ import dayjs from "dayjs"
 import { costs as costsRawR1 } from "./data/cost.js"
 import { spreads as spreadsRawR1 } from "./data/spread.js"
 import { costs as costsRawR2 } from "./data/cost2.js"
-import { spreads as spreadsRawR2 } from "./data/spread.js"
+import { spreads as spreadsRawR2 } from "./data/spread2.js"
 
 import "./App.css"
 import CustomLegend from "./CustomLegend.tsx"
@@ -32,6 +32,7 @@ type CostRow = {
   snapshotId: number
   timestampUk: string
   tenor: string
+  source: "acp" | "trayport" | string
   costCalculationType: "All" | "Fixed" | "Variable"
   avg: number
 }
@@ -40,7 +41,6 @@ type SpreadRow = {
   snapshotId: number
   timestampUk: string
   tenor: string
-  source: "acp" | "trayport" | string
   avg: number
 }
 

@@ -8,20 +8,17 @@ type PairHighlighterProps = {
     /**
      * Compare aKey vs bKey at each timestamp:
      * green where aKey > bKey, red otherwise.
+     *
+     * Assumption (by design for your use-case):
+     * - aKey is the SPREAD series (needs true connectNulls interpolation)
+     * - bKey is the COST series (your previous behavior was OK)
      */
     aKey: keyof CombinedRow
     bKey: keyof CombinedRow
 
-    /**
-     * Visuals
-     */
     aboveColor?: string
     belowColor?: string
     opacity?: number
-
-    /**
-     * For stable React keys / debugging
-     */
     id: string
 }
 
@@ -31,9 +28,11 @@ type PairHighlighterProps = {
  * - green where A > B
  * - red where A <= B
  *
- * Notes:
- * - Always mimics Line `connectNulls` (bridges missing values using last-known values).
- * - Intended for Recharts <Customized component={<PairHighlighter ... />} /> usage.
+ * Null behavior:
+ * - A (spread): true Recharts-like connectNulls = skip nulls and linearly interpolate between nearest valid neighbors
+ * - B (cost): keeps your previous "works fine" continuity = forward-fill (last known)
+ *
+ * Designed for Recharts <Customized component={<PairHighlighter ... />} /> usage.
  */
 export function PairHighlighter(props: PairHighlighterProps & Record<string, unknown>) {
     const {
@@ -59,34 +58,75 @@ export function PairHighlighter(props: PairHighlighterProps & Record<string, unk
 
     type ConnectedPoint = { timestampUk: string; a: number; b: number }
 
-    /**
-     * Always "connectNulls":
-     * - If a is missing at timestamp i, use last known a
-     * - If b is missing at timestamp i, use last known b
-     * - Emit point only when both are available
-     */
     const connected: ConnectedPoint[] = useMemo(() => {
+        const sx = xAxis.scale as (v: unknown) => number
+
+        const n = data.length
+        const xs = new Array<number>(n)
+        const aVals = new Array<number | null>(n)
+
+        for (let i = 0; i < n; i++) {
+            xs[i] = sx(data[i].timestampUk)
+            const aRaw = data[i][aKey]
+            aVals[i] = typeof aRaw === "number" ? aRaw : null
+        }
+
+        // Precompute next valid A index for each position (for interpolation)
+        const nextValidA = new Array<number>(n).fill(-1)
+        let next = -1
+        for (let i = n - 1; i >= 0; i--) {
+            if (typeof aVals[i] === "number") next = i
+            nextValidA[i] = next
+        }
+
         const out: ConnectedPoint[] = []
-        let lastA: number | null = null
+
         let lastB: number | null = null
 
-        for (const row of data) {
-            const aRaw = row[aKey]
-            const bRaw = row[bKey]
+        // Track previous valid A index
+        let prevA = -1
 
-            const a = typeof aRaw === "number" ? aRaw : lastA
-            const b = typeof bRaw === "number" ? bRaw : lastB
+        for (let i = 0; i < n; i++) {
+            // Resolve A (spread) with true connectNulls interpolation
+            let aResolved: number | null = null
+            const aRaw = aVals[i]
 
-            if (typeof a === "number" && typeof b === "number") {
-                out.push({ timestampUk: row.timestampUk, a, b })
+            if (typeof aRaw === "number") {
+                aResolved = aRaw
+                prevA = i
+            } else {
+                const left = prevA
+                const right = nextValidA[i]
+                if (left !== -1 && right !== -1 && right !== left) {
+                    const xL = xs[left]
+                    const xR = xs[right]
+                    const xI = xs[i]
+                    const aL = aVals[left] as number
+                    const aR = aVals[right] as number
+
+                    const denom = xR - xL
+                    if (Number.isFinite(denom) && denom !== 0) {
+                        const t = (xI - xL) / denom
+                        if (Number.isFinite(t)) {
+                            aResolved = aL + t * (aR - aL)
+                        }
+                    }
+                }
             }
 
-            if (typeof aRaw === "number") lastA = aRaw
+            // Resolve B (cost) with forward-fill
+            const bRaw = data[i][bKey]
+            const bResolved = typeof bRaw === "number" ? bRaw : lastB
             if (typeof bRaw === "number") lastB = bRaw
+
+            // Only emit points where both sides are defined
+            if (typeof aResolved === "number" && typeof bResolved === "number") {
+                out.push({ timestampUk: data[i].timestampUk, a: aResolved, b: bResolved })
+            }
         }
 
         return out
-    }, [data, aKey, bKey])
+    }, [data, aKey, bKey, xAxis.scale])
 
     if (connected.length < 2) return null
 
@@ -102,8 +142,8 @@ export function PairHighlighter(props: PairHighlighterProps & Record<string, unk
     }
 
     const segments: Seg[] = useMemo(() => {
-        const sx = xAxis.scale
-        const sy = yAxis.scale
+        const sx = xAxis.scale as (v: unknown) => number
+        const sy = yAxis.scale as (v: unknown) => number
         const out: Seg[] = []
 
         for (let i = 0; i < connected.length - 1; i++) {
@@ -131,28 +171,25 @@ export function PairHighlighter(props: PairHighlighterProps & Record<string, unk
     if (segments.length === 0) return null
 
     // Find crossing where (A - B) changes sign inside a segment (pixel-space linear interpolation).
+    const splitAtCrossing = (s: Seg) => {
+        const diff0 = s.yB0 - s.yA0
+        const diff1 = s.yB1 - s.yA1
+        const denom = diff0 - diff1
+        if (denom === 0) return null
+
+        const t = diff0 / denom
+        if (t <= 0 || t >= 1) return null
+
+        const x = s.x0 + t * (s.x1 - s.x0)
+        const yA = s.yA0 + t * (s.yA1 - s.yA0)
+        const yB = s.yB0 + t * (s.yB1 - s.yB0)
+
+        return { x, yA, yB }
+    }
 
     type StripPoint = { x: number; yTop: number; yBot: number }
 
     const { aboveStrips, belowStrips } = useMemo(() => {
-        const splitAtCrossing = (s: Seg) => {
-            // diff is vertical separation (B - A) in pixel space
-            const diff0 = s.yB0 - s.yA0
-            const diff1 = s.yB1 - s.yA1
-            const denom = diff0 - diff1
-            if (denom === 0) return null
-
-            const t = diff0 / denom
-            if (t <= 0 || t >= 1) return null
-
-            const x = s.x0 + t * (s.x1 - s.x0)
-            const yA = s.yA0 + t * (s.yA1 - s.yA0)
-            const yB = s.yB0 + t * (s.yB1 - s.yB0)
-
-            return { x, yA, yB }
-        }
-
-
         const above: StripPoint[][] = []
         const below: StripPoint[][] = []
 
@@ -189,8 +226,6 @@ export function PairHighlighter(props: PairHighlighterProps & Record<string, unk
             const isAbove0 = s.above0
             const isAbove1 = s.above1
 
-            // Choose which line is "top" and which is "bottom" for the filled band:
-            // If A is above B, top=A bottom=B; else top=B bottom=A.
             const top0 = isAbove0 ? s.yA0 : s.yB0
             const bot0 = isAbove0 ? s.yB0 : s.yA0
             const top1 = isAbove1 ? s.yA1 : s.yB1
@@ -211,8 +246,7 @@ export function PairHighlighter(props: PairHighlighterProps & Record<string, unk
                 continue
             }
 
-            // At the crossing A==B, so yTop==yBot for that point.
-            const yCross = cross.yA // equals cross.yB (numerically close)
+            const yCross = cross.yA // equals cross.yB at intersection
 
             if (current.length === 0) pushPoint(isAbove0, { x: s.x0, yTop: top0, yBot: bot0 })
             pushPoint(isAbove0, { x: cross.x, yTop: yCross, yBot: yCross })
@@ -269,15 +303,14 @@ type MultiHighlighterProps = {
     route?: "r1" | "r2"
 
     /**
-     * Your hidden state, using canonical metric keys (no _r1/_r2 suffix)
-     * Example keys: spread_acp, spread_trayport, cost_all, cost_fixed, cost_variable
+     * Hidden state keyed by canonical metric keys:
+     * spread_acp, spread_trayport, cost_all, cost_fixed, cost_variable
      */
     hidden: Record<string, boolean>
 
-    /**
-     * Optional per-cost opacity (helps prevent "mud" when 3 bands overlap)
-     */
     opacityByCost?: Partial<Record<CostBase, number>>
+    aboveColor?: string
+    belowColor?: string
 }
 
 /**
@@ -285,8 +318,6 @@ type MultiHighlighterProps = {
  * Renders up to 6 PairHighlighter overlays:
  * - spread_acp vs (all, fixed, variable)
  * - spread_trayport vs (all, fixed, variable)
- *
- * Each pair is enabled only when BOTH metrics are visible and enabled=true.
  */
 export default function MultiHighlighter(props: MultiHighlighterProps & Record<string, unknown>) {
     const {
@@ -294,11 +325,9 @@ export default function MultiHighlighter(props: MultiHighlighterProps & Record<s
         enabled,
         hidden,
         route = "r1",
-        opacityByCost = {
-            cost_all: 0.2,
-            cost_fixed: 0.4,
-            cost_variable: 0.6,
-        },
+        opacityByCost = { cost_all: 0.08, cost_fixed: 0.1, cost_variable: 0.12 },
+        aboveColor,
+        belowColor,
     } = props
 
     if (!enabled) return null
@@ -306,7 +335,7 @@ export default function MultiHighlighter(props: MultiHighlighterProps & Record<s
     const spreads: SpreadBase[] = ["spread_acp", "spread_trayport"]
     const costs: CostBase[] = ["cost_all", "cost_fixed", "cost_variable"]
 
-    const isVisible = (key: string) => !hidden[key]
+    const isVisible = (k: string) => !hidden[k]
 
     return (
         <>
@@ -327,7 +356,9 @@ export default function MultiHighlighter(props: MultiHighlighterProps & Record<s
                             aKey={aKey}
                             bKey={bKey}
                             opacity={opacityByCost[c] ?? 0.1}
-                            {...props} // pass through injected Recharts Customized props (xAxisMap/yAxisMap/etc)
+                            aboveColor={aboveColor}
+                            belowColor={belowColor}
+                            {...props} // pass through injected Recharts props (xAxisMap/yAxisMap/etc)
                         />
                     )
                 })
