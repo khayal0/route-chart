@@ -8,7 +8,6 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  type TooltipProps,
 } from "recharts"
 import type { DataKey } from "recharts/types/util/types"
 import customParseFormat from "dayjs/plugin/customParseFormat"
@@ -22,6 +21,7 @@ import { spreads as spreadsRawR2 } from "./data/spread.js"
 
 import "./App.css"
 import CustomLegend from "./CustomLegend.tsx"
+import CustomTooltip from "./CustomTooltip.tsx"
 
 dayjs.extend(customParseFormat)
 dayjs.extend(isoWeek)
@@ -44,7 +44,7 @@ type SpreadRow = {
 
 type RouteKey = "r1" | "r2"
 
-type CombinedRow = {
+export type CombinedRow = {
   timestampUk: string
   tenor: string
 
@@ -61,7 +61,7 @@ type CombinedRow = {
   spread_trayport_r2?: number
 }
 
-const COLORS: Record<string, string> = {
+export const COLORS: Record<string, string> = {
   cost_all: "#4afe03",
   cost_fixed: "#0367fe",
   cost_variable: "#38fff8",
@@ -69,7 +69,7 @@ const COLORS: Record<string, string> = {
   spread_trayport: "#facc15",
 }
 
-const ROUTE_2_DASH = "6 4"
+const ROUTE_2_DASH = "6 4";
 
 function normalizeCostType(v: string) {
   const t = v.toLowerCase()
@@ -118,26 +118,35 @@ function deduplicateWeekends<T extends Record<string, unknown>>(data: T[]) {
 
 type RouteData = { costs: CostRow[]; spreads: SpreadRow[] }
 
+// ✅ add these types just above combineRouteIntoMap (or near RouteKey)
+type CostBase = "cost_all" | "cost_fixed" | "cost_variable"
+type SpreadBase = "spread_acp" | "spread_trayport"
+type MetricBase = CostBase | SpreadBase
+type MetricKeyForRoute<R extends RouteKey> = `${MetricBase}_${R}`
+
+function metricKey<R extends RouteKey>(base: MetricBase, routeKey: R): MetricKeyForRoute<R> {
+  return `${base}_${routeKey}` as MetricKeyForRoute<R>
+}
+
 function combineRouteIntoMap(route: RouteData, routeKey: RouteKey, map: Map<string, CombinedRow>) {
   const ensure = (timestampUk: string, tenor: string) => {
     if (!map.has(timestampUk)) map.set(timestampUk, { timestampUk, tenor })
     return map.get(timestampUk)!
   }
-  const key = (base: string) => `${base}_${routeKey}` as keyof CombinedRow
 
   for (const c of route.costs) {
     const row = ensure(c.timestampUk, c.tenor)
     const t = normalizeCostType(c.costCalculationType)
-    if (t === "all") row[key("cost_all")] = c.avg
-    if (t === "fixed") row[key("cost_fixed")] = c.avg
-    if (t === "variable") row[key("cost_variable")] = c.avg
+    if (t === "all") row[metricKey("cost_all", routeKey)] = c.avg
+    if (t === "fixed") row[metricKey("cost_fixed", routeKey)] = c.avg
+    if (t === "variable") row[metricKey("cost_variable", routeKey)] = c.avg
   }
 
   for (const s of route.spreads) {
     const row = ensure(s.timestampUk, s.tenor)
     const m = normalizeMarket(s.source)
-    if (m === "acp") row[key("spread_acp")] = s.avg
-    if (m === "trayport") row[key("spread_trayport")] = s.avg
+    if (m === "acp") row[metricKey("spread_acp", routeKey)] = s.avg
+    if (m === "trayport") row[metricKey("spread_trayport", routeKey)] = s.avg
   }
 }
 
@@ -154,7 +163,7 @@ function combineTwoRoutes(route1: RouteData, route2?: RouteData | null): Combine
 /** Canonical metrics (ONE legend item each) */
 type MetricKey = "spread_acp" | "spread_trayport" | "cost_all" | "cost_fixed" | "cost_variable"
 
-const METRICS: Array<{ key: MetricKey; label: string; colorKey: MetricKey }> = [
+export const METRICS: Array<{ key: MetricKey; label: string; colorKey: MetricKey }> = [
   { key: "spread_acp", label: "Spread ACP", colorKey: "spread_acp" },
   { key: "spread_trayport", label: "Spread Trayport", colorKey: "spread_trayport" },
   { key: "cost_all", label: "Cost All", colorKey: "cost_all" },
@@ -167,78 +176,6 @@ function toR1(metric: MetricKey) {
 }
 function toR2(metric: MetricKey) {
   return `${metric}_r2` as keyof CombinedRow
-}
-
-/** Tooltip that shows Route 1 | Route 2 side-by-side */
-function TwoRouteTooltip({
-  active,
-  label,
-  payload,
-  hasRoute2,
-}: TooltipProps<number, string> & { hasRoute2: boolean }) {
-  if (!active || !payload || payload.length === 0) return null
-
-  const row = payload[0]?.payload as CombinedRow | undefined
-  if (!row) return null
-
-  const formatNum = (v: unknown) =>
-    typeof v === "number" && Number.isFinite(v) ? v.toFixed(4) : "—"
-
-  return (
-    <div
-      style={{
-        backgroundColor: "#111",
-        borderRadius: 6,
-        padding: "10px 12px",
-        color: "#fff",
-        boxShadow: "0 6px 16px rgba(0,0,0,0.4)",
-        minWidth: 320,
-      }}
-    >
-      <div style={{ color: "#bbb", fontSize: 16, marginBottom: 8 }}>{label}</div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: hasRoute2 ? "1.3fr 1fr 1fr" : "1.3fr 1fr",
-          gap: 8,
-          alignItems: "center",
-        }}
-      >
-        <div />
-        <div style={{ color: "#bbb", fontSize: 12 }}>Route 1</div>
-        {hasRoute2 ? <div style={{ color: "#bbb", fontSize: 12 }}>Route 2</div> : null}
-
-        {METRICS.map((m) => {
-          const v1 = row[`${m.key}_r1` as keyof CombinedRow]
-          const v2 = row[`${m.key}_r2` as keyof CombinedRow]
-          const color = COLORS[m.colorKey]
-
-          return (
-            <div key={m.key} style={{ display: "contents" }}>
-              {/* colored name cell */}
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                <span
-                  aria-hidden
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 2,
-                    background: color,
-                    display: "inline-block",
-                  }}
-                />
-                <span style={{ fontSize: 12, color: "#ddd" }}>{m.label}</span>
-              </div>
-
-              <div style={{ fontSize: 12 }}>{formatNum(v1)}</div>
-              {hasRoute2 ? <div style={{ fontSize: 12 }}>{formatNum(v2)}</div> : null}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
 }
 
 
@@ -269,10 +206,10 @@ export default function CostsAndSpreadsChart() {
    */
   const [hidden, setHidden] = useState<Record<MetricKey, boolean>>({
     spread_acp: false,
-    spread_trayport: false,
+    spread_trayport: true,
     cost_all: false,
-    cost_fixed: false,
-    cost_variable: false,
+    cost_fixed: true,
+    cost_variable: true,
   })
 
   const toggleMetric = (metric: string) => {
@@ -314,7 +251,9 @@ export default function CostsAndSpreadsChart() {
             animationEasing="linear"
             animationDuration={100}
             cursor={{ stroke: "#111", strokeOpacity: 0.15 }}
-            content={(props) => <TwoRouteTooltip {...props} hasRoute2={hasRoute2} />}
+            content={(props) =>
+              <CustomTooltip {...props} hasRoute2={hasRoute2} hiddenKeys={hidden} />
+            }
           />
 
           <Legend

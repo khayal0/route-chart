@@ -50,7 +50,7 @@ export default function CustomLegend({
     })()
 
     return (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, paddingLeft: 60, paddingTop: 10 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, paddingLeft: 55, paddingTop: 10 }}>
             {unique.map(({ entry, key }, idx) => {
                 const isHidden = Boolean(hiddenKeys[key])
                 const color = String(entry.color ?? "#111")
@@ -75,14 +75,14 @@ export default function CustomLegend({
                         <span
                             aria-hidden
                             style={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: 2,
+                                width: 8,
+                                height: 8,
+                                borderRadius: 1,
                                 background: color,
                                 display: "inline-block",
                             }}
                         />
-                        <span style={{ fontSize: 12, color, lineHeight: 1 }}>{LABELS[entry.value || ""] ?? entry.value}</span>
+                        <span style={{ fontSize: 14, color, lineHeight: 1 }}>{LABELS[entry.value || ""] ?? entry.value}</span>
                     </button>
                 )
             })}
