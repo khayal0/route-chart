@@ -1,57 +1,55 @@
-import { useMemo } from "react"
+import React, { useMemo } from "react"
 import type { CombinedRow } from "./App"
 
-type Props = {
+type PairHighlighterProps = {
     data: CombinedRow[]
     enabled: boolean
 
     /**
-     * Which route to compare. Defaults to r1.
+     * Compare aKey vs bKey at each timestamp:
+     * green where aKey > bKey, red otherwise.
      */
-    route?: "r1" | "r2"
+    aKey: keyof CombinedRow
+    bKey: keyof CombinedRow
 
     /**
-     * Which metrics to compare.
-     * Defaults to spread_acp vs cost_fixed (as you said you changed it).
+     * Visuals
      */
-    spreadBase?: "spread_acp" | "spread_trayport"
-    costBase?: "cost_all" | "cost_fixed" | "cost_variable"
-
-    /**
-     * Mimic Recharts Line `connectNulls` behavior for BOTH series.
-     * When true, null/missing values are bridged using the last known value,
-     * matching the visual continuity you get from `connectNulls`.
-     */
-    connectNulls?: boolean
-
-    /**
-     * Fill opacity for highlight regions.
-     */
+    aboveColor?: string
+    belowColor?: string
     opacity?: number
+
+    /**
+     * For stable React keys / debugging
+     */
+    id: string
 }
 
 /**
- * Highlights the area between two lines:
- * - green where spread > cost
- * - red otherwise
+ * PairHighlighter
+ * Shades the area between two series (aKey and bKey):
+ * - green where A > B
+ * - red where A <= B
  *
- * Designed for <Customized component={<HighlightAreas ... />} />
+ * Notes:
+ * - Always mimics Line `connectNulls` (bridges missing values using last-known values).
+ * - Intended for Recharts <Customized component={<PairHighlighter ... />} /> usage.
  */
-export default function HighlightAreas(props: Props & Record<string, unknown>) {
+export function PairHighlighter(props: PairHighlighterProps & Record<string, unknown>) {
     const {
         data,
         enabled,
-        route = "r1",
-        spreadBase = "spread_acp",
-        costBase = "cost_fixed",
-        connectNulls = true,
-        opacity = 0.5,
+        aKey,
+        bKey,
+        aboveColor = "#22c55e",
+        belowColor = "#ef4444",
+        opacity = 0.12,
+        id,
     } = props
 
-    // Recharts injects these into Customized components:
+    // Injected by Recharts Customized
     const xAxisMap = (props as { xAxisMap?: Record<string, any> }).xAxisMap
     const yAxisMap = (props as { yAxisMap?: Record<string, any> }).yAxisMap
-
     const xAxis = xAxisMap ? Object.values(xAxisMap)[0] : null
     const yAxis = yAxisMap ? Object.values(yAxisMap)[0] : null
 
@@ -59,53 +57,46 @@ export default function HighlightAreas(props: Props & Record<string, unknown>) {
     if (!xAxis?.scale || !yAxis?.scale) return null
     if (!data || data.length < 2) return null
 
-    const spreadKey = `${spreadBase}_${route}` as keyof CombinedRow
-    const costKey = `${costBase}_${route}` as keyof CombinedRow
-
-    type ConnectedPoint = { timestampUk: string; spread: number; cost: number }
+    type ConnectedPoint = { timestampUk: string; a: number; b: number }
 
     /**
-     * Build a series that matches how Recharts draws when connectNulls is true:
-     * - If a point is missing spread, use the last known spread
-     * - If a point is missing cost, use the last known cost
-     * - Only emit points where we have BOTH numbers at that x-position
-     *
-     * When connectNulls=false, only emit points where BOTH are present in the raw row.
+     * Always "connectNulls":
+     * - If a is missing at timestamp i, use last known a
+     * - If b is missing at timestamp i, use last known b
+     * - Emit point only when both are available
      */
     const connected: ConnectedPoint[] = useMemo(() => {
         const out: ConnectedPoint[] = []
-        let lastSpread: number | null = null
-        let lastCost: number | null = null
+        let lastA: number | null = null
+        let lastB: number | null = null
 
         for (const row of data) {
-            const sRaw = row[spreadKey]
-            const cRaw = row[costKey]
+            const aRaw = row[aKey]
+            const bRaw = row[bKey]
 
-            const s =
-                typeof sRaw === "number" ? sRaw : connectNulls ? lastSpread : null
-            const c =
-                typeof cRaw === "number" ? cRaw : connectNulls ? lastCost : null
+            const a = typeof aRaw === "number" ? aRaw : lastA
+            const b = typeof bRaw === "number" ? bRaw : lastB
 
-            if (typeof s === "number" && typeof c === "number") {
-                out.push({ timestampUk: row.timestampUk, spread: s, cost: c })
+            if (typeof a === "number" && typeof b === "number") {
+                out.push({ timestampUk: row.timestampUk, a, b })
             }
 
-            if (typeof sRaw === "number") lastSpread = sRaw
-            if (typeof cRaw === "number") lastCost = cRaw
+            if (typeof aRaw === "number") lastA = aRaw
+            if (typeof bRaw === "number") lastB = bRaw
         }
 
         return out
-    }, [data, spreadKey, costKey, connectNulls])
+    }, [data, aKey, bKey])
 
     if (connected.length < 2) return null
 
     type Seg = {
         x0: number
         x1: number
-        ySpread0: number
-        ySpread1: number
-        yCost0: number
-        yCost1: number
+        yA0: number
+        yA1: number
+        yB0: number
+        yB1: number
         above0: boolean
         above1: boolean
     }
@@ -116,22 +107,22 @@ export default function HighlightAreas(props: Props & Record<string, unknown>) {
         const out: Seg[] = []
 
         for (let i = 0; i < connected.length - 1; i++) {
-            const a = connected[i]
-            const b = connected[i + 1]
+            const p0 = connected[i]
+            const p1 = connected[i + 1]
 
-            const x0 = sx(a.timestampUk)
-            const x1 = sx(b.timestampUk)
+            const x0 = sx(p0.timestampUk)
+            const x1 = sx(p1.timestampUk)
 
-            const ySpread0 = sy(a.spread)
-            const ySpread1 = sy(b.spread)
-            const yCost0 = sy(a.cost)
-            const yCost1 = sy(b.cost)
+            const yA0 = sy(p0.a)
+            const yA1 = sy(p1.a)
+            const yB0 = sy(p0.b)
+            const yB1 = sy(p1.b)
 
-            const above0 = a.spread > a.cost
-            const above1 = b.spread > b.cost
+            const above0 = p0.a > p0.b
+            const above1 = p1.a > p1.b
 
-            if (![x0, x1, ySpread0, ySpread1, yCost0, yCost1].every(Number.isFinite)) continue
-            out.push({ x0, x1, ySpread0, ySpread1, yCost0, yCost1, above0, above1 })
+            if (![x0, x1, yA0, yA1, yB0, yB1].every(Number.isFinite)) continue
+            out.push({ x0, x1, yA0, yA1, yB0, yB1, above0, above1 })
         }
 
         return out
@@ -139,11 +130,11 @@ export default function HighlightAreas(props: Props & Record<string, unknown>) {
 
     if (segments.length === 0) return null
 
-    // Find where (spread - cost) crosses 0 within a segment, in pixel space.
+    // Find crossing where (A - B) changes sign inside a segment (pixel-space linear interpolation).
     const splitAtCrossing = (s: Seg) => {
-        // diff is the vertical separation (cost - spread) in pixel space
-        const diff0 = s.yCost0 - s.ySpread0
-        const diff1 = s.yCost1 - s.ySpread1
+        // diff is vertical separation (B - A) in pixel space
+        const diff0 = s.yB0 - s.yA0
+        const diff1 = s.yB1 - s.yA1
         const denom = diff0 - diff1
         if (denom === 0) return null
 
@@ -151,41 +142,41 @@ export default function HighlightAreas(props: Props & Record<string, unknown>) {
         if (t <= 0 || t >= 1) return null
 
         const x = s.x0 + t * (s.x1 - s.x0)
-        const ySpread = s.ySpread0 + t * (s.ySpread1 - s.ySpread0)
-        const yCost = s.yCost0 + t * (s.yCost1 - s.yCost0)
+        const yA = s.yA0 + t * (s.yA1 - s.yA0)
+        const yB = s.yB0 + t * (s.yB1 - s.yB0)
 
-        return { x, ySpread, yCost }
+        return { x, yA, yB }
     }
 
     type StripPoint = { x: number; yTop: number; yBot: number }
 
-    const { greenStrips, redStrips } = useMemo(() => {
-        const green: StripPoint[][] = []
-        const red: StripPoint[][] = []
+    const { aboveStrips, belowStrips } = useMemo(() => {
+        const above: StripPoint[][] = []
+        const below: StripPoint[][] = []
 
         let current: StripPoint[] = []
-        let currentIsGreen: boolean | null = null
+        let currentIsAbove: boolean | null = null
 
         const flush = () => {
-            if (currentIsGreen === null || current.length < 2) {
+            if (currentIsAbove === null || current.length < 2) {
                 current = []
-                currentIsGreen = null
+                currentIsAbove = null
                 return
             }
-            ; (currentIsGreen ? green : red).push(current)
+            ; (currentIsAbove ? above : below).push(current)
             current = []
-            currentIsGreen = null
+            currentIsAbove = null
         }
 
-        const pushPoint = (isGreen: boolean, p: StripPoint) => {
-            if (currentIsGreen === null) {
-                currentIsGreen = isGreen
+        const pushPoint = (isAbove: boolean, p: StripPoint) => {
+            if (currentIsAbove === null) {
+                currentIsAbove = isAbove
                 current = [p]
                 return
             }
-            if (currentIsGreen !== isGreen) {
+            if (currentIsAbove !== isAbove) {
                 flush()
-                currentIsGreen = isGreen
+                currentIsAbove = isAbove
                 current = [p]
                 return
             }
@@ -193,39 +184,45 @@ export default function HighlightAreas(props: Props & Record<string, unknown>) {
         }
 
         for (const s of segments) {
-            const isGreen0 = s.above0
-            const isGreen1 = s.above1
+            const isAbove0 = s.above0
+            const isAbove1 = s.above1
 
-            if (isGreen0 === isGreen1) {
-                if (current.length === 0) {
-                    pushPoint(isGreen0, { x: s.x0, yTop: s.ySpread0, yBot: s.yCost0 })
-                }
-                pushPoint(isGreen0, { x: s.x1, yTop: s.ySpread1, yBot: s.yCost1 })
+            // Choose which line is "top" and which is "bottom" for the filled band:
+            // If A is above B, top=A bottom=B; else top=B bottom=A.
+            const top0 = isAbove0 ? s.yA0 : s.yB0
+            const bot0 = isAbove0 ? s.yB0 : s.yA0
+            const top1 = isAbove1 ? s.yA1 : s.yB1
+            const bot1 = isAbove1 ? s.yB1 : s.yA1
+
+            if (isAbove0 === isAbove1) {
+                if (current.length === 0) pushPoint(isAbove0, { x: s.x0, yTop: top0, yBot: bot0 })
+                pushPoint(isAbove0, { x: s.x1, yTop: top1, yBot: bot1 })
                 continue
             }
 
             const cross = splitAtCrossing(s)
             if (!cross) {
                 flush()
-                pushPoint(isGreen0, { x: s.x0, yTop: s.ySpread0, yBot: s.yCost0 })
-                pushPoint(isGreen0, { x: s.x1, yTop: s.ySpread1, yBot: s.yCost1 })
+                pushPoint(isAbove0, { x: s.x0, yTop: top0, yBot: bot0 })
+                pushPoint(isAbove0, { x: s.x1, yTop: top1, yBot: bot1 })
                 flush()
                 continue
             }
 
-            if (current.length === 0) {
-                pushPoint(isGreen0, { x: s.x0, yTop: s.ySpread0, yBot: s.yCost0 })
-            }
-            pushPoint(isGreen0, { x: cross.x, yTop: cross.ySpread, yBot: cross.yCost })
+            // At the crossing A==B, so yTop==yBot for that point.
+            const yCross = cross.yA // equals cross.yB (numerically close)
+
+            if (current.length === 0) pushPoint(isAbove0, { x: s.x0, yTop: top0, yBot: bot0 })
+            pushPoint(isAbove0, { x: cross.x, yTop: yCross, yBot: yCross })
 
             flush()
 
-            pushPoint(isGreen1, { x: cross.x, yTop: cross.ySpread, yBot: cross.yCost })
-            pushPoint(isGreen1, { x: s.x1, yTop: s.ySpread1, yBot: s.yCost1 })
+            pushPoint(isAbove1, { x: cross.x, yTop: yCross, yBot: yCross })
+            pushPoint(isAbove1, { x: s.x1, yTop: top1, yBot: bot1 })
         }
 
         flush()
-        return { greenStrips: green, redStrips: red }
+        return { aboveStrips: above, belowStrips: below }
     }, [segments])
 
     const buildPath = (strip: StripPoint[]) => {
@@ -236,27 +233,103 @@ export default function HighlightAreas(props: Props & Record<string, unknown>) {
     }
 
     return (
-        <g>
-            {greenStrips.map((strip, idx) => (
+        <g data-pair-highlighter={id}>
+            {aboveStrips.map((strip, idx) => (
                 <path
-                    key={`g-${idx}`}
+                    key={`${id}-above-${idx}`}
                     d={buildPath(strip)}
-                    fill="#11ec23"
+                    fill={aboveColor}
                     fillOpacity={opacity}
                     stroke="none"
                     pointerEvents="none"
                 />
             ))}
-            {redStrips.map((strip, idx) => (
+            {belowStrips.map((strip, idx) => (
                 <path
-                    key={`r-${idx}`}
+                    key={`${id}-below-${idx}`}
                     d={buildPath(strip)}
-                    fill="#ef4444"
+                    fill={belowColor}
                     fillOpacity={opacity}
                     stroke="none"
                     pointerEvents="none"
                 />
             ))}
         </g>
+    )
+}
+
+type CostBase = "cost_all" | "cost_fixed" | "cost_variable"
+type SpreadBase = "spread_acp" | "spread_trayport"
+
+type MultiHighlighterProps = {
+    data: CombinedRow[]
+    enabled: boolean
+    route?: "r1" | "r2"
+
+    /**
+     * Your hidden state, using canonical metric keys (no _r1/_r2 suffix)
+     * Example keys: spread_acp, spread_trayport, cost_all, cost_fixed, cost_variable
+     */
+    hidden: Record<string, boolean>
+
+    /**
+     * Optional per-cost opacity (helps prevent "mud" when 3 bands overlap)
+     */
+    opacityByCost?: Partial<Record<CostBase, number>>
+}
+
+/**
+ * MultiHighlighter
+ * Renders up to 6 PairHighlighter overlays:
+ * - spread_acp vs (all, fixed, variable)
+ * - spread_trayport vs (all, fixed, variable)
+ *
+ * Each pair is enabled only when BOTH metrics are visible and enabled=true.
+ */
+export default function MultiHighlighter(props: MultiHighlighterProps & Record<string, unknown>) {
+    const {
+        data,
+        enabled,
+        hidden,
+        route = "r1",
+        opacityByCost = {
+            cost_all: 0.08,
+            cost_fixed: 0.1,
+            cost_variable: 0.12,
+        },
+    } = props
+
+    if (!enabled) return null
+
+    const spreads: SpreadBase[] = ["spread_acp", "spread_trayport"]
+    const costs: CostBase[] = ["cost_all", "cost_fixed", "cost_variable"]
+
+    const isVisible = (key: string) => !hidden[key]
+
+    return (
+        <>
+            {spreads.map((s) =>
+                costs.map((c) => {
+                    const pairEnabled = enabled && isVisible(s) && isVisible(c)
+                    if (!pairEnabled) return null
+
+                    const aKey = `${s}_${route}` as keyof CombinedRow
+                    const bKey = `${c}_${route}` as keyof CombinedRow
+
+                    return (
+                        <PairHighlighter
+                            key={`${s}-${c}-${route}`}
+                            id={`${s}-${c}-${route}`}
+                            data={data}
+                            enabled={pairEnabled}
+                            aKey={aKey}
+                            bKey={bKey}
+                            opacity={opacityByCost[c] ?? 0.1}
+                            {...props} // pass through injected Recharts Customized props (xAxisMap/yAxisMap/etc)
+                        />
+                    )
+                })
+            )}
+        </>
     )
 }

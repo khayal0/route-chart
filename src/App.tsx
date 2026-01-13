@@ -250,7 +250,7 @@ export default function CostsAndSpreadsChart() {
           <Customized component={
             <HighlightAreas
               data={data}
-              enabled={!hidden.highlight} id={"1"} />
+              enabled={!hidden.highlight} id={"1"} hidden={hidden} />
           } />
           <CartesianGrid stroke="#ccc" strokeOpacity={0.1} strokeWidth={1} strokeDasharray="5 5" />
           <XAxis dataKey="timestampUk" />
