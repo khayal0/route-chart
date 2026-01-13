@@ -68,7 +68,7 @@ export default function CustomLegend({
                             background: "transparent",
                             cursor: "pointer",
                             padding: "2px 4px",
-                            opacity: isHidden ? 0.45 : 1,
+                            opacity: isHidden ? 0.25 : 1,
                         }}
                         title="Toggle series"
                     >

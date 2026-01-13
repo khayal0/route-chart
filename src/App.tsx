@@ -8,6 +8,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  Customized,
 } from "recharts"
 import type { DataKey } from "recharts/types/util/types"
 import customParseFormat from "dayjs/plugin/customParseFormat"
@@ -22,6 +23,7 @@ import { spreads as spreadsRawR2 } from "./data/spread.js"
 import "./App.css"
 import CustomLegend from "./CustomLegend.tsx"
 import CustomTooltip from "./CustomTooltip.tsx"
+import HighlightAreas from "./HighlightAreas.tsx"
 
 dayjs.extend(customParseFormat)
 dayjs.extend(isoWeek)
@@ -161,7 +163,7 @@ function combineTwoRoutes(route1: RouteData, route2?: RouteData | null): Combine
 }
 
 /** Canonical metrics (ONE legend item each) */
-type MetricKey = "spread_acp" | "spread_trayport" | "cost_all" | "cost_fixed" | "cost_variable"
+type MetricKey = "spread_acp" | "spread_trayport" | "cost_all" | "cost_fixed" | "cost_variable" | "highlight"
 
 export const METRICS: Array<{ key: MetricKey; label: string; colorKey: MetricKey }> = [
   { key: "spread_acp", label: "Spread ACP", colorKey: "spread_acp" },
@@ -210,6 +212,7 @@ export default function CostsAndSpreadsChart() {
     cost_all: false,
     cost_fixed: true,
     cost_variable: true,
+    highlight: false
   })
 
   const toggleMetric = (metric: string) => {
@@ -242,11 +245,16 @@ export default function CostsAndSpreadsChart() {
   return (
     <div style={{ width: "90%", height: 600 }}>
       <ResponsiveContainer>
+
         <LineChart data={data} margin={{ top: 20, right: 20, left: 20, bottom: 5 }}>
+          <Customized component={
+            <HighlightAreas
+              data={data}
+              enabled={!hidden.highlight} id={"1"} />
+          } />
           <CartesianGrid stroke="#ccc" strokeOpacity={0.1} strokeWidth={1} strokeDasharray="5 5" />
           <XAxis dataKey="timestampUk" />
           <YAxis />
-
           <Tooltip
             animationEasing="linear"
             animationDuration={100}
@@ -255,7 +263,6 @@ export default function CostsAndSpreadsChart() {
               <CustomTooltip {...props} hasRoute2={hasRoute2} hiddenKeys={hidden} />
             }
           />
-
           <Legend
             content={(props) => (
               <CustomLegend
@@ -266,7 +273,6 @@ export default function CostsAndSpreadsChart() {
               />
             )}
           />
-
           {METRICS.map((m) => (
             <Line
               key={`${m.key}-r1`}
